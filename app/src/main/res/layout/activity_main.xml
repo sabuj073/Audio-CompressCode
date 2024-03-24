@@ -7,7 +7,14 @@
     android:orientation="vertical"
     tools:context=".MainActivity">
 
+    <TextView
+        android:id="@+id/durationtext"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Duration:" />
+
     <Button
+        android:layout_marginTop="10dp"
         android:id="@+id/button_select_audio"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

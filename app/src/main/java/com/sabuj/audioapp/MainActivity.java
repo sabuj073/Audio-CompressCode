@@ -5,6 +5,7 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -15,6 +16,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -34,6 +36,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Locale;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -42,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     EditText editText_compression_percentage;
     Button button_apply;
     int reduce;
+    TextView durationtext;
 
     String selectedFilePath="";
 
@@ -69,6 +73,7 @@ public class MainActivity extends AppCompatActivity {
         button_apply = findViewById(R.id.button_apply);
         progressBar = findViewById(R.id.progressBar);
         progressBar.setVisibility(View.GONE);
+        durationtext = findViewById(R.id.durationtext);
 
 
         findViewById(R.id.button_select_audio).setOnClickListener(v -> pickAudioFromGallery());
@@ -81,6 +86,36 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
+    private void calculateAndDisplayDuration(String filePath) throws IOException {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(filePath);
+            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long durationMs = Long.parseLong(durationStr); // Duration in milliseconds
+            String durationFormatted = formatDuration(durationMs);
+            durationtext.setText("Duration: " + durationFormatted);
+        } catch (Exception e) {
+            durationtext.setText("Duration: Unknown");
+            Log.e("DurationError", "Could not calculate duration", e);
+        } finally {
+            retriever.release();
+        }
+    }
+
+    private String formatDuration(long durationMs) {
+        long seconds = (durationMs / 1000) % 60;
+        long minutes = (durationMs / (1000 * 60)) % 60;
+        long hours = (durationMs / (1000 * 60 * 60)) % 24;
+
+        if (hours > 0) {
+            return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds);
+        } else {
+            return String.format(Locale.US, "%02d:%02d", minutes, seconds);
+        }
+    }
+
+
 
     private void pickAudioFromGallery() {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
@@ -115,84 +150,146 @@ public class MainActivity extends AppCompatActivity {
             if (data != null) {
                 Uri audioUri = data.getData();
                 selectedFilePath = copyFileFromUri(audioUri);
+                try {
+                    calculateAndDisplayDuration(selectedFilePath);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
 
-    private void compressAudioFile(String inputFilePath, int reduce) {
+//    private void compressAudioFile(String inputFilePath, int reduce) {
+//
+//        runOnUiThread(() -> progressBar.setVisibility(View.VISIBLE));
+//        // First, we need to get the bitrate of the original file
+//        FFprobeKit.getMediaInformationAsync(inputFilePath, info -> {
+//            MediaInformation mediaInformation = info.getMediaInformation();
+//            if (mediaInformation != null) {
+//                StreamInformation audioStream = mediaInformation.getStreams().get(0);
+//                String originalBitrateString = audioStream.getBitrate();
+//
+//                if (originalBitrateString != null) {
+//                    int originalBitrate = Integer.parseInt(originalBitrateString);
+//                    originalBitrate = originalBitrate/1000;
+//                    float reduce_temp = 1 - (reduce / 100.0f);
+//                    int targetBitrate = (int) (originalBitrate * reduce_temp);
+//
+//                    String fileName = "compressed_audio.mp3";
+//                    deleteExistingFileInMusicDirectory(fileName);
+//                    ContentValues values = new ContentValues();
+//                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+//                    values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp3");
+//                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC);
+//
+//                    // Get URI for the file
+//                    Uri audioUri = getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
+//
+//                    if (audioUri != null) {
+//                        try {
+//                            OutputStream outputStream = getContentResolver().openOutputStream(audioUri);
+//                            if (outputStream != null) {
+//                                File outputFile = new File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), fileName);
+//                                Log.d("Output File", String.valueOf(outputFile));
+//                                if (outputFile.exists()) {
+//                                    Log.d("Output File exists", String.valueOf(outputFile));
+//                                    outputFile.delete();
+//                                }
+//                                String outputFilePath = outputFile.getAbsolutePath();
+//                                String cmd = "-y -i " + inputFilePath + " -b:a " + reduce + "k -ar 22050 -ac 1 " + outputFilePath;
+//                                Log.d("CMD",cmd);
+//                                FFmpegKit.executeAsync(cmd, session -> {
+//                                    if (ReturnCode.isSuccess(session.getReturnCode())) {
+//                                        try {
+//                                            FileInputStream inputStream = new FileInputStream(outputFilePath);
+//                                            byte[] buffer = new byte[1024];
+//                                            int length;
+//                                            while ((length = inputStream.read(buffer)) > 0) {
+//                                                outputStream.write(buffer, 0, length);
+//                                            }
+//                                            outputStream.flush();
+//                                            inputStream.close();
+//                                            outputStream.close();
+//
+//                                            // Delete the temporary compressed file
+//                                            new File(outputFilePath).delete();
+//
+//                                            // Log and Toast message
+//                                            Log.d("CompressedFilePath", "File saved at: " + audioUri.toString());
+//                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "File saved at: " + audioUri.toString(), Toast.LENGTH_LONG).show());
+//                                            runOnUiThread(() -> progressBar.setVisibility(View.GONE));
+//                                        } catch (IOException e) {
+//                                            e.printStackTrace();
+//                                            runOnUiThread(() -> progressBar.setVisibility(View.GONE));
+//                                        }
+//                                    }
+//                                });
+//                            }
+//                        } catch (FileNotFoundException e) {
+//                            e.printStackTrace();
+//                        }
+//                    }
+//                }
+//            }
+//        });
+//    }
 
+    private void compressAudioFile(String inputFilePath, int reduce) {
         runOnUiThread(() -> progressBar.setVisibility(View.VISIBLE));
-        // First, we need to get the bitrate of the original file
+
+        // Custom directory within the app's external files directory
+        String customDirectoryName = "Audio";
+        File customDirectory = new File(getExternalFilesDir(null), customDirectoryName);
+        if (!customDirectory.exists() && !customDirectory.mkdirs()) {
+            Log.e("compressAudioFile", "Could not create custom directory");
+            return;
+        }
+        String fileName = "compressed_audio.mp3";
+        File outputFile = new File(customDirectory, fileName);
+
+        // Check and delete existing file
+        if (outputFile.exists()) {
+            boolean deleted = outputFile.delete();
+            if (!deleted) {
+                Log.e("compressAudioFile", "Could not delete existing file");
+                return;
+            }
+        }
+
         FFprobeKit.getMediaInformationAsync(inputFilePath, info -> {
             MediaInformation mediaInformation = info.getMediaInformation();
-            if (mediaInformation != null) {
+            if (mediaInformation != null && mediaInformation.getStreams() != null && !mediaInformation.getStreams().isEmpty()) {
                 StreamInformation audioStream = mediaInformation.getStreams().get(0);
                 String originalBitrateString = audioStream.getBitrate();
 
                 if (originalBitrateString != null) {
-                    int originalBitrate = Integer.parseInt(originalBitrateString);
-                    originalBitrate = originalBitrate/1000;
-                    float reduce_temp = 1 - (reduce / 100.0f);
-                    int targetBitrate = (int) (originalBitrate * reduce_temp);
+                    int originalBitrate = Integer.parseInt(originalBitrateString) / 1000; // Convert to kbps
+                    float reduceFactor = 1 - (reduce / 100.0f);
+                    int targetBitrate = (int) (originalBitrate * reduceFactor);
 
-                    String fileName = "compressed_audio.mp3";
-                    deleteExistingFileInMusicDirectory(fileName);
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
-                    values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp3");
-                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC);
+                    // FFmpeg command to compress and save the audio
+                    String outputFilePath = outputFile.getAbsolutePath();
+                    String cmd = "-y -i " + inputFilePath + " -b:a " + targetBitrate + "k " + outputFilePath;
 
-                    // Get URI for the file
-                    Uri audioUri = getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
-
-                    if (audioUri != null) {
-                        try {
-                            OutputStream outputStream = getContentResolver().openOutputStream(audioUri);
-                            if (outputStream != null) {
-                                File outputFile = new File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), fileName);
-                                Log.d("Output File", String.valueOf(outputFile));
-                                if (outputFile.exists()) {
-                                    Log.d("Output File exists", String.valueOf(outputFile));
-                                    outputFile.delete();
-                                }
-                                String outputFilePath = outputFile.getAbsolutePath();
-                                String cmd = "-y -i " + inputFilePath + " -b:a " + reduce + "k -ar 22050 -ac 1 " + outputFilePath;
-                                Log.d("CMD",cmd);
-                                FFmpegKit.executeAsync(cmd, session -> {
-                                    if (ReturnCode.isSuccess(session.getReturnCode())) {
-                                        try {
-                                            FileInputStream inputStream = new FileInputStream(outputFilePath);
-                                            byte[] buffer = new byte[1024];
-                                            int length;
-                                            while ((length = inputStream.read(buffer)) > 0) {
-                                                outputStream.write(buffer, 0, length);
-                                            }
-                                            outputStream.flush();
-                                            inputStream.close();
-                                            outputStream.close();
-
-                                            // Delete the temporary compressed file
-                                            new File(outputFilePath).delete();
-
-                                            // Log and Toast message
-                                            Log.d("CompressedFilePath", "File saved at: " + audioUri.toString());
-                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "File saved at: " + audioUri.toString(), Toast.LENGTH_LONG).show());
-                                            runOnUiThread(() -> progressBar.setVisibility(View.GONE));
-                                        } catch (IOException e) {
-                                            e.printStackTrace();
-                                            runOnUiThread(() -> progressBar.setVisibility(View.GONE));
-                                        }
-                                    }
-                                });
-                            }
-                        } catch (FileNotFoundException e) {
-                            e.printStackTrace();
+                    FFmpegKit.executeAsync(cmd, session -> {
+                        if (ReturnCode.isSuccess(session.getReturnCode())) {
+                            // Compression successful
+                            Log.d("CompressAudio", "Audio compressed successfully: " + outputFilePath);
+                            runOnUiThread(() -> {
+                                Toast.makeText(MainActivity.this, "Audio saved in custom directory.", Toast.LENGTH_SHORT).show();
+                                progressBar.setVisibility(View.GONE);
+                            });
+                        } else {
+                            // Compression failed
+                            Log.e("CompressAudio", "Audio compression failed.");
+                            runOnUiThread(() -> progressBar.setVisibility(View.GONE));
                         }
-                    }
+                    });
                 }
             }
         });
     }
+
 
     private void deleteExistingFileInMusicDirectory(String fileName) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
